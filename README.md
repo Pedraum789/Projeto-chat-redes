@@ -1,4 +1,6 @@
 # Projeto-chat-redes
+Apos rodar a aplicacao, utilizar o comando: `telnet localhost 8080`
+
 
 ## Metodos para login
 
