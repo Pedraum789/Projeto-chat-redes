@@ -1,12 +1,41 @@
 import socket
 import csv
 import pandas as pd
+import threading
+import time
 from csv import DictWriter
 
 PORT = ""
 SERVERPORT = 8081
 
+MENSAGES = []
+CONNECTIONS = []
 FIELD_NAMES = ['LOGIN', 'PASSWORD']
+
+def connectionAndSplit(connectionSocket):
+    request = connectionSocket.recv(1024).decode()
+
+    return request.split()
+
+def enviar_mensagem_individual(conexao):
+    for i in range(conexao['last'], len(MENSAGES)):
+        conexao['connectionSocket'].send(MENSAGES[i])
+        conexao['last'] = i + 1
+        time.sleep(0.2)
+        
+def sendMessage(room, msg):
+    for i in CONNECTIONS:
+        if i['sala'] == room:
+            i['mensagens'].append(msg)
+            for users in i['users']:
+                for mensagens in i['mensagens']:
+                    users['conn'].send(mensagens)
+                
+def sendMessageToAll(room, connectionSocket, addr):
+    while True:
+        receive = connectionAndSplit(connectionSocket)
+        msg = receive
+        sendMessage(room, msg)
 
 def haveLogin(login):
     file = open('logins.csv')
@@ -48,7 +77,25 @@ def registerLogin(login):
     
         #Close the file object
         f_object.close()
-        
+
+def haveRoom(room):
+    for i in CONNECTIONS:
+        if i['sala'] == room:
+            return True
+    return False
+
+def createRoom(room):
+    if haveRoom(room):
+        return False
+    
+    CONNECTIONS.append({'sala': room, 'users': [{"addr": "", "conn": "", "last": 0, "username": ""}], 'mensagens': []})
+    return True
+
+def joinOnRoom(room, connectionSocket, addr, login):
+    for i in CONNECTIONS:
+        if i['sala'] == room:
+            i['users'].append({"addr": addr, "conn": connectionSocket, "last": 0, "username": login})
+
 def registerPassword(login, password):
     
     file = open('logins.csv')
@@ -72,7 +119,7 @@ def registerPassword(login, password):
 '''
     Funcao que faz o login
 '''
-def doingLogin(connectionSocket, split_request):
+def doingLogin(connectionSocket, split_request, addr):
     print("Entrou no metodo LOGIN")
     if(len(split_request) > 1):
         login = split_request[1][split_request[1].find('<') + 1:split_request[1].find('>')]
@@ -82,18 +129,22 @@ def doingLogin(connectionSocket, split_request):
             response = "HTTP/1.1 200 OK\n\nUsuario com login\nPara logar utilizar o comando:\nPASSWORD <SENHA>\n\n"
             connectionSocket.sendall(response.encode())
             doingPassword(connectionSocket, login)
-            return True
+            CONNECTIONS.append({"connectionSocket": connectionSocket,
+                               "addr": addr,
+                               "login": login,
+                               "last":0})
+            return [True, login]
         else:
             print("Usuario nao tem login cadastrado")
             response = "HTTP/1.1 200 OK\n\nUsuario sem login\nPara se cadastrar utilizar o comando:\nREGISTER_LOGIN <NOME DO USUARIO>\n\n"
             connectionSocket.sendall(response.encode())
-            return False
+            return [False, login]
     else:
-        print("Chamada errada " + split_request)
+        print("Chamada errada " + split_request[0])
         response = "HTTP/1.1 500 Error\n\nFavor utilizar o comando corretamente LOGIN <NOME DO USUARIO>"
         connectionSocket.sendall(response.encode())
         connectionSocket.close()
-        return False
+        return [False, login]
 
 
 
@@ -115,7 +166,7 @@ def doingRegisterLogin(connectionSocket, split_request):
             doingRegisterPassword(login, connectionSocket)
             return True
     else:
-        print("Chamada errada " + split_request)
+        print("Chamada errada " + split_request[0])
         response = "HTTP/1.1 500 Error\n\nFavor utilizar o comando corretamente LOGIN <NOME DO USUARIO>\n\n"
         connectionSocket.sendall(response.encode())
         connectionSocket.close()
@@ -143,17 +194,23 @@ def doingPassword(connectionSocket, login):
         split_request = connectionAndSplit(connectionSocket)
         if split_request[0] == 'PASSWORD':
             if verifyingPassword(connectionSocket ,split_request, login):
-                response = "HTTP/1.1 200 OK\n\nLogin FEITO!\n\n"
+                response  = "HTTP/1.1 200 OK\n\nLogin FEITO!\n\nComandos disponiveis:\n\n"
+                response += "LIST --- Listar Salas\n"
+                response += "CREATE <NOME DA SALA> -- Criar uma sala\n"
+                response += "JOIN <NOME DA SALA> --- Entrar na sala\n"
+                response += "LEAVE_SERVER --- Deixar o servidor\n\n"
+                
                 connectionSocket.sendall(response.encode())
-                return True
+                break
             else:
                 print("Senha errada")
                 response = "HTTP/1.1 200 OK\n\nSenha incorreta\nFavor utilizar o comando novamente:\nPASSWORD <SENHA>\n\n"
                 connectionSocket.sendall(response.encode())
         else:
-            print("Chamada errada " + split_request)
+            print("Chamada errada " + split_request[0])
             response = "HTTP/1.1 500 Error\n\nFavor utilizar o comando corretamente PASSWORD <SENHA>\n\n"
             connectionSocket.sendall(response.encode())
+    return True
 
 def verifyingPassword(connectionSocket, split_request, login):
     print("Entrou no metodo PASSWORD")
@@ -166,15 +223,104 @@ def verifyingPassword(connectionSocket, split_request, login):
         else:
             return False
     else:
-        print("Chamada errada " + split_request)
+        print("Chamada errada " + split_request[0])
         response = "HTTP/1.1 500 Error\n\nFavor utilizar o comando corretamente PASSWORD <SENHA>\n\n"
         connectionSocket.sendall(response.encode())
         return False
 
-def connectionAndSplit(connectionSocket):
-    request = connectionSocket.recv(1024).decode()
+def listRooms():
+    file = open('servers.csv')
+    csvreader = csv.reader(file)
+    rooms = ""
 
-    return request.split()
+    for row in csvreader:
+        rooms += (row[0] + "\n")
+    file.close()
+    return rooms
+
+def joinRoom(room, connectionSocket):
+    
+    request = connectionSocket.recv(1024).decode()
+    while True:
+        if request.split()[0] == 'MSG':
+            enviar_mensagem_todos(room)
+        else:
+            pass
+
+def rooms(connectionSocket, addr, login):
+    while True:
+        split_request = connectionAndSplit(connectionSocket)
+        
+        if split_request[0] == 'LIST':
+            rooms = listRooms()
+            response = "HTTP/1.1 200 OK\n\nSalas do servidor:\n\n" + rooms + "\n"
+            connectionSocket.sendall(response.encode())
+            
+        elif split_request[0] == 'CREATE':
+            room = split_request[1][split_request[1].find('<') + 1:split_request[1].find('>')]
+            if room == "":
+                response = "HTTP/1.1 500 Error\n\nNome da sala com espacos!\n\n"
+                connectionSocket.sendall(response.encode())
+            elif createRoom(room):
+                response = "HTTP/1.1 200 OK\n\nSala CRIADA!\n\n"
+                connectionSocket.sendall(response.encode())
+            else:
+                response = "HTTP/1.1 200 OK\n\nSala ja existe no servidor!\n\n"
+                connectionSocket.sendall(response.encode())
+        
+        elif split_request[0] == 'JOIN':
+            room = split_request[1][split_request[1].find('<') + 1:split_request[1].find('>')]
+            if room == "":
+                response = "HTTP/1.1 500 Error\n\nNome da sala com espacos!\n\n"
+                connectionSocket.sendall(response.encode())
+            elif haveRoom(room):
+                response = "HTTP/1.1 200 OK\n\nVoce entrou na sala {}!\n\n".format(room)
+                connectionSocket.sendall(response.encode())
+                
+                joinOnRoom(room, connectionSocket, addr, login)
+                sendMessageToAll(room, connectionSocket, addr)
+            else:
+                response = "HTTP/1.1 500 Error\n\nSala nao existe\n\n"
+                connectionSocket.sendall(response.encode())
+            
+        
+        elif split_request[0] == 'LEAVE_SERVER':
+            print("Saindo do servidor")
+            response = "HTTP/1.1 200 OK\n\nSaindo do servidor...\nBye :)\n"
+            connectionSocket.sendall(response.encode())
+            connectionSocket.close()
+            break
+        else:
+            response  = "HTTP/1.1 200 OK\n\nComando nao existe\n"
+            response += "Comandos disponiveis:\n\n"
+            response += "LIST --- Listar Salas\n"
+            response += "CREATE <NOME DA SALA> -- Criar uma sala\n"
+            response += "JOIN <NOME DA SALA> --- Entrar na sala\n"
+            response += "LEAVE_SERVER --- Deixar o servidor\n\n"
+            connectionSocket.sendall(response.encode())
+    return True
+
+def handle_client(connectionSocket, addr):
+    print("Nova coneccao feita, endereco: {}".format(addr))
+    
+    while True:
+        split_request = connectionAndSplit(connectionSocket)
+        try:
+            if split_request[0] == 'LOGIN':
+                resp = doingLogin(connectionSocket ,split_request, addr)
+                if resp[0]:
+                    rooms(connectionSocket, addr, resp[1])
+                    
+            elif split_request[0] == 'REGISTER_LOGIN':
+                if doingRegisterLogin(connectionSocket ,split_request):
+                    pass
+            else:
+                print("Comando não pode ser interpretado por esse servidor!")
+                response = "ERRO! Servidor não reconhece esse comando!"
+                connectionSocket.sendall(response.encode())
+                connectionSocket.close()
+        except:
+            pass
 
 def inicializeServer():
 
@@ -188,28 +334,10 @@ def inicializeServer():
     serverSocket.listen(1)
 
     print("Servidor HTTP/1.1 Inicializado")
-
-    connectionSocket, addr = serverSocket.accept()
-
     while True:
-        print("Cliente {} conectado ao servidor".format(addr))
-        
-        split_request = connectionAndSplit(connectionSocket)
-        
-        try:
-            if split_request[0] == 'LOGIN':
-                if doingLogin(connectionSocket ,split_request):
-                    pass
-            elif split_request[0] == 'REGISTER_LOGIN':
-                if doingRegisterLogin(connectionSocket ,split_request):
-                    pass
-            else:
-                print("Comando não pode ser interpretado por esse servidor!")
-                response = ("ERRO! Servidor não reconhece esse comando!").encode()
-                connectionSocket.send(response)
-                connectionSocket.close()
-        except:
-            pass
+        connectionSocket, addr = serverSocket.accept()      
+        thread = threading.Thread(target=handle_client, args=(connectionSocket, addr))
+        thread.start()
         
 if __name__ == "__main__":
     inicializeServer()
