@@ -154,12 +154,12 @@ def doingLogin(connectionSocket, split_request, addr):
             return [True, login]
         else:
             print("Usuario nao tem login cadastrado")
-            response = "HTTP/1.1 200 OK\n\nUsuario sem login\nPara se cadastrar utilizar o comando:\nREGISTER_LOGIN <NOME DO USUARIO>\n\n"
+            response = "HTTP/1.1 401 Unauthorized\n\nUsuario sem login\nPara se cadastrar utilizar o comando:\nREGISTER_LOGIN <NOME DO USUARIO>\n\n"
             connectionSocket.sendall(response.encode())
             return [False, login]
     else:
         print("Chamada errada " + split_request[0])
-        response = "HTTP/1.1 500 Error\n\nFavor utilizar o comando corretamente LOGIN <NOME DO USUARIO>"
+        response = "HTTP/1.1 406 Not Acceptable\n\nFavor utilizar o comando corretamente LOGIN <NOME DO USUARIO>"
         connectionSocket.sendall(response.encode())
         connectionSocket.close()
         return [False, login]
@@ -185,7 +185,7 @@ def doingRegisterLogin(connectionSocket, split_request):
             return True
     else:
         print("Chamada errada " + split_request[0])
-        response = "HTTP/1.1 500 Error\n\nFavor utilizar o comando corretamente LOGIN <NOME DO USUARIO>\n\n"
+        response = "HTTP/1.1 404 Not Found\n\nFavor utilizar o comando corretamente REGISTER_LOGIN <NOME DO USUARIO>\n\n"
         connectionSocket.sendall(response.encode())
         connectionSocket.close()
         return False
@@ -203,7 +203,7 @@ def doingRegisterPassword(login, connectionSocket):
                 return True
         else:
             print("Chamada errada " + split_request[0])
-            response = "HTTP/1.1 500 Error\n\nFavor utilizar o comando corretamente REGISTER_PASSWORD <SENHA>\n\n"
+            response = "HTTP/1.1 404 Not Found\n\nFavor utilizar o comando corretamente REGISTER_PASSWORD <SENHA>\n\n"
             connectionSocket.sendall(response.encode())
 
 
@@ -222,11 +222,11 @@ def doingPassword(connectionSocket, login):
                 break
             else:
                 print("Senha errada")
-                response = "HTTP/1.1 200 OK\n\nSenha incorreta\nFavor utilizar o comando novamente:\nPASSWORD <SENHA>\n\n"
+                response = "HTTP/1.1 401 Unauthorized\n\nSenha incorreta\nFavor utilizar o comando novamente:\nPASSWORD <SENHA>\n\n"
                 connectionSocket.sendall(response.encode())
         else:
             print("Chamada errada " + split_request[0])
-            response = "HTTP/1.1 500 Error\n\nFavor utilizar o comando corretamente PASSWORD <SENHA>\n\n"
+            response = "HTTP/1.1 404 Not Found\n\nFavor utilizar o comando corretamente PASSWORD <SENHA>\n\n"
             connectionSocket.sendall(response.encode())
     return True
 
@@ -271,7 +271,7 @@ def rooms(connectionSocket, addr, login):
                 response = "HTTP/1.1 500 Error\n\nNome da sala com espacos!\n\n"
                 connectionSocket.sendall(response.encode())
             elif createRoom(room):
-                response = "HTTP/1.1 200 OK\n\nSala CRIADA!\n\n"
+                response = "HTTP/1.1 201 Created\n\nSala CRIADA!\n\n"
                 connectionSocket.sendall(response.encode())
             else:
                 response = "HTTP/1.1 200 OK\n\nSala ja existe no servidor!\n\n"
@@ -288,7 +288,7 @@ def rooms(connectionSocket, addr, login):
                 connectionSocket.sendall(response.encode())
                 sendMessageAfterJoin(room, connectionSocket, addr, login)
             else:
-                response = "HTTP/1.1 500 Error\n\nSala nao existe\n\n"
+                response = "HTTP/1.1 404 Not found\n\nSala nao existe\n\n"
                 connectionSocket.sendall(response.encode())
             
         
@@ -328,7 +328,8 @@ def handle_client(connectionSocket, addr):
                 connectionSocket.sendall(response.encode())
                 connectionSocket.close()
         except:
-            pass
+            response = "ERRO! Servidor não reconhece esse comando!"
+            connectionSocket.sendall(response.encode())
 
 def inicializeServer():
 
