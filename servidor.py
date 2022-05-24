@@ -22,20 +22,42 @@ def enviar_mensagem_individual(conexao):
         conexao['connectionSocket'].send(MENSAGES[i])
         conexao['last'] = i + 1
         time.sleep(0.2)
-        
-def sendMessage(room, msg):
+
+#{'sala': room, 'users': [{"addr": "", "conn": "", "last": 0, "username": ""}], 'mensagens': []}
+def sendMessage(room, msg, login):
     for i in CONNECTIONS:
         if i['sala'] == room:
+            if msg == '/EXIT\r\n':
+                if removeUserRoom(i, login):
+                    return False
             i['mensagens'].append(msg)
-            for users in i['users']:
-                for mensagens in i['mensagens']:
-                    users['conn'].send(mensagens)
+            for user in i['users']:
+                for m in range(user['last'], len(i['mensagens'])):
+                    if (user['username'] == login and len(i['mensagens'])-1 == m):
+                        pass
+                    else:
+                        user['conn'].sendall(i['mensagens'][m].encode())
+                    user['last'] += 1
+                    time.sleep(0.1)
+    return True
+
+def removeUserRoom(objeto, login):
+    for i in range(len(objeto['users'])):
+        if objeto['users'][i]['username'] == login:
+            objeto['users'].pop(i)
+            return True
+    return False
                 
-def sendMessageToAll(room, connectionSocket, addr):
+      
+def sendMessageAfterJoin(room, connectionSocket, addr, login):
     while True:
-        receive = connectionAndSplit(connectionSocket)
-        msg = receive
-        sendMessage(room, msg)
+        receive = connectionSocket.recv(1024).decode() 
+        if sendMessage(room, receive, login) == False:
+            print("Saiu da sala user: " + login)
+            response = "HTTP/1.1 200 OK\n\nUsuario saiu da sala\n\n"
+            connectionSocket.sendall(response.encode())
+            break
+            
 
 def haveLogin(login):
     file = open('logins.csv')
@@ -88,7 +110,7 @@ def createRoom(room):
     if haveRoom(room):
         return False
     
-    CONNECTIONS.append({'sala': room, 'users': [{"addr": "", "conn": "", "last": 0, "username": ""}], 'mensagens': []})
+    CONNECTIONS.append({'sala': room, 'users': [], 'mensagens': []})
     return True
 
 def joinOnRoom(room, connectionSocket, addr, login):
@@ -129,10 +151,6 @@ def doingLogin(connectionSocket, split_request, addr):
             response = "HTTP/1.1 200 OK\n\nUsuario com login\nPara logar utilizar o comando:\nPASSWORD <SENHA>\n\n"
             connectionSocket.sendall(response.encode())
             doingPassword(connectionSocket, login)
-            CONNECTIONS.append({"connectionSocket": connectionSocket,
-                               "addr": addr,
-                               "login": login,
-                               "last":0})
             return [True, login]
         else:
             print("Usuario nao tem login cadastrado")
@@ -228,24 +246,15 @@ def verifyingPassword(connectionSocket, split_request, login):
         connectionSocket.sendall(response.encode())
         return False
 
+
+
+#{'sala': room, 'users': [{"addr": "", "conn": "", "last": 0, "username": ""}], 'mensagens': []}
 def listRooms():
-    file = open('servers.csv')
-    csvreader = csv.reader(file)
-    rooms = ""
-
-    for row in csvreader:
-        rooms += (row[0] + "\n")
-    file.close()
+    rooms = ''
+    for i in CONNECTIONS:
+        rooms += (i['sala'] + '\n\n')
+        
     return rooms
-
-def joinRoom(room, connectionSocket):
-    
-    request = connectionSocket.recv(1024).decode()
-    while True:
-        if request.split()[0] == 'MSG':
-            enviar_mensagem_todos(room)
-        else:
-            pass
 
 def rooms(connectionSocket, addr, login):
     while True:
@@ -275,10 +284,9 @@ def rooms(connectionSocket, addr, login):
                 connectionSocket.sendall(response.encode())
             elif haveRoom(room):
                 response = "HTTP/1.1 200 OK\n\nVoce entrou na sala {}!\n\n".format(room)
-                connectionSocket.sendall(response.encode())
-                
                 joinOnRoom(room, connectionSocket, addr, login)
-                sendMessageToAll(room, connectionSocket, addr)
+                connectionSocket.sendall(response.encode())
+                sendMessageAfterJoin(room, connectionSocket, addr, login)
             else:
                 response = "HTTP/1.1 500 Error\n\nSala nao existe\n\n"
                 connectionSocket.sendall(response.encode())
